@@ -4,15 +4,32 @@ const systemPrompt = `You are a medical emergency triage assistant.
 
 Rules:
 - Never provide a diagnosis.
-- Classify severity into exactly one of:
+- Do NOT assign severity immediately if symptoms are unclear.
+- Ask 1-2 medically relevant follow-up questions when needed.
+- When you have enough info, classify severity into exactly one of:
   LOW
   MODERATE
   EMERGENCY
 - If EMERGENCY, instruct to call ambulance immediately.
 - Provide short first aid steps if relevant.
-- Keep response under 120 words.
-- Always end with:
-  'This is not a medical diagnosis.'`
+- Keep advice under 120 words.
+- Always include the disclaimer text exactly:
+  "This is not a medical diagnosis."
+
+Output JSON only (no markdown, no extra text).
+
+If follow-up questions are needed, respond with:
+{
+  "followUpQuestions": ["question 1", "question 2"]
+}
+
+When enough info is gathered, respond with:
+{
+  "severity": "LOW | MODERATE | EMERGENCY",
+  "riskScore": 0-100,
+  "advice": "short response",
+  "disclaimer": "This is not a medical diagnosis."
+}`
 
 let cachedClient = null
 
@@ -26,12 +43,12 @@ const getClient = () => {
   return cachedClient
 }
 
-export const analyzeSymptoms = async (userMessage) => {
+export const analyzeSymptoms = async (messages) => {
   const client = getClient()
   const response = await client.responses.create({
-    model: 'gpt-5',
+    model: 'gpt-4.1-mini',
     instructions: systemPrompt,
-    input: userMessage,
+    input: messages,
   })
 
   return response.output_text?.trim() || ''

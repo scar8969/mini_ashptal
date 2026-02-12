@@ -15,16 +15,30 @@ app.get('/api/health', (_req, res) => {
 
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { userMessage } = req.body
-    if (!userMessage || typeof userMessage !== 'string') {
-      return res.status(400).json({ error: 'userMessage is required.' })
+    const { messages } = req.body
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'messages is required.' })
+    }
+
+    const cleaned = messages
+      .filter(
+        (msg) =>
+          msg &&
+          typeof msg === 'object' &&
+          typeof msg.role === 'string' &&
+          typeof msg.content === 'string',
+      )
+      .slice(-8)
+
+    if (cleaned.length === 0) {
+      return res.status(400).json({ error: 'messages is required.' })
     }
 
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({ error: 'Missing OPENAI_API_KEY.' })
     }
 
-    const text = await analyzeSymptoms(userMessage)
+    const text = await analyzeSymptoms(cleaned)
     return res.json({ text })
   } catch (error) {
     console.error('Analyze error:', error)
