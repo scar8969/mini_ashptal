@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 // --- CONSTANTS & HELPERS ---
@@ -108,7 +108,7 @@ const analyzeSymptoms = async (history) => {
     })
 
     if (!response.ok) throw new Error('API unavailable')
-    
+
     const data = await response.json()
     return data.text
 
@@ -141,19 +141,24 @@ function EmergencyDashboard() {
   const [isVoiceMode, setIsVoiceMode] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [lastRiskScore, setLastRiskScore] = useState(null)
-  
+
   const [insuranceInfo, setInsuranceInfo] = useState({
     provider: '', policyNumber: '', policyHolder: '', relationship: 'Self',
     helpline: '', validTill: '', coverageType: '', tpa: '',
   })
   const [insuranceNotice, setInsuranceNotice] = useState('')
   const [isInsuranceVisible, setIsInsuranceVisible] = useState(false)
-  
+
   const [medicalCard, setMedicalCard] = useState({
     fullName: '', bloodGroup: '', allergies: '', medications: '',
     conditions: '', emergencyContact: '', insurance: '',
   })
   const [medicalNotice, setMedicalNotice] = useState('')
+
+  // Streaming state for word-by-word bot replies
+  const [streamingText, setStreamingText] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const streamingRef = useRef(null)
 
   // --- EFFECTS ---
 
@@ -252,7 +257,7 @@ function EmergencyDashboard() {
     setIsLoading(true)
 
     try {
-      const history = [...messages, userMessage].map((m) =>({
+      const history = [...messages, userMessage].map((m) => ({
         role: m.sender === 'user' ? 'user' : 'assistant', content: m.text
       }))
 
@@ -266,14 +271,31 @@ function EmergencyDashboard() {
         botText = parsed.followUpQuestions.join(' ')
       } else if (parsed?.severity && typeof parsed?.riskScore === 'number') {
         const riskScore = Math.max(0, Math.min(100, Math.round(parsed.riskScore)))
-        botText = `Severity: ${parsed.severity}\nRiskScore: ${riskScore}\nAdvice: ${parsed.advice || ''}`
+        botText = `Severity: ${parsed.severity} \nRiskScore: ${riskScore} \nAdvice: ${parsed.advice || ''} `
         setLastRiskScore(riskScore)
         if (parsed.severity === 'EMERGENCY') setIsEmergency(true)
       }
 
       const botMessage = { id: Date.now() + 1, sender: 'bot', text: botText }
-      setMessages((prev) => [...prev, botMessage])
-      speakText(botText)
+
+      // Stream word-by-word
+      const words = botText.split(' ')
+      let wordIndex = 0
+      setIsStreaming(true)
+      setStreamingText('')
+
+      streamingRef.current = setInterval(() => {
+        wordIndex++
+        setStreamingText(words.slice(0, wordIndex).join(' '))
+        if (wordIndex >= words.length) {
+          clearInterval(streamingRef.current)
+          streamingRef.current = null
+          setIsStreaming(false)
+          setStreamingText('')
+          setMessages((prev) => [...prev, botMessage])
+          speakText(botText)
+        }
+      }, 60)
     } catch (error) {
       const fallback = 'Service is temporarily unavailable.'
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'bot', text: fallback }])
@@ -285,8 +307,8 @@ function EmergencyDashboard() {
   const selectedContact = contacts.find((c) => c.id === selectedContactId)
   const primaryContact = selectedContact || contacts[0]
 
-  const handleCallContact = () => primaryContact && (window.location.href = `tel:${primaryContact.phone}`)
-  
+  const handleCallContact = () => primaryContact && (window.location.href = `tel:${primaryContact.phone} `)
+
   const handleFindHospitals = () => {
     if (!navigator.geolocation) return setHospitalError('Geolocation not supported.')
     setIsFindingHospitals(true)
@@ -315,13 +337,13 @@ function EmergencyDashboard() {
   }, [medicalCard, insuranceInfo, primaryContact])
 
   const handleCopy = async (text, setNotice) => {
-    try { await navigator.clipboard.writeText(text); setNotice('Copied!') } 
+    try { await navigator.clipboard.writeText(text); setNotice('Copied!') }
     catch { setNotice('Copy failed.') }
   }
 
   const handleShare = async (title, text, setNotice) => {
     if (navigator.share) {
-      try { await navigator.share({ title, text }); setNotice('Shared!') } catch {}
+      try { await navigator.share({ title, text }); setNotice('Shared!') } catch { }
     } else {
       handleCopy(text, setNotice)
     }
@@ -331,196 +353,213 @@ function EmergencyDashboard() {
 
   return (
     <div className="app dashboard">
-      
-      {/* --- HEADER --- */}
-      <header className="onboarding-header">
-        <div className="header-brand-icon">
-            <span style={{ fontSize: '2rem' }}>🚑</span>
-        </div>
-        <h1 className="onboarding-title">Sankat AI</h1>
-        <p className="onboarding-subtitle" style={{ color: 'var(--text-muted)' }}>Emergency Response System</p>
-        <Link to="/onboarding" style={{ marginTop: '1rem', color: 'var(--primary)', fontWeight: 'bold' }}>
-            Edit Profile
-        </Link>
-      </header>
 
-      {/* --- TOP SECTION --- */}
-      <section className="onboarding-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-           <p className="progress-label">PATIENT</p>
-           <h2 style={{ margin: 0 }}>{medicalCard.fullName || 'Guest'}</h2>
-        </div>
-        <div>
-           <p className="progress-label">BLOOD GROUP</p>
-           <h2 style={{ margin: 0, color: 'var(--primary)' }}>{medicalCard.bloodGroup || '?'}</h2>
-        </div>
-      </section>
-
-      {/* --- EMERGENCY PANEL --- */}
-      {isEmergency && (
-        <section className="onboarding-section" style={{ background: '#FEF2F2', borderColor: '#FECACA' }}>
-          <div style={{ marginBottom: '16px' }}>
-            <h2 style={{ color: 'var(--primary)' }}>⚠️ Possible Emergency</h2>
-            <p>Risk Score: <strong>{riskScore}</strong></p>
+      {/* Top Navigation Bar */}
+      <nav className="top-navbar">
+        <div className="navbar-brand">
+          <div className="navbar-brand-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.25 4.53l-6.72 3.36a2 2 0 00-1.03 1.57v4.61c0 4.15 2.62 7.89 6.46 9.2a2 2 0 001.28 0c3.84-1.31 6.46-5.05 6.46-9.2v-4.6a2 2 0 00-1.03-1.58l-6.72-3.36a2 2 0 00-1.78 0z" />
+              <path fillRule="evenodd" d="M12 7.5a.75.75 0 01.75.75v3h3a.75.75 0 010 1.5h-3v3a.75.75 0 01-1.5 0v-3h-3a.75.75 0 010-1.5h3v-3A.75.75 0 0112 7.5z" clipRule="evenodd" />
+            </svg>
           </div>
-          
-          <div className="form-grid">
-             <a href="tel:108" className="dock-btn primary" style={{ textAlign: 'center', textDecoration: 'none' }}>
-               Call Ambulance
-             </a>
-             <button onClick={handleCallContact} disabled={!primaryContact} className="dock-btn secondary" style={{ background: 'white' }}>
-               Call Contact
-             </button>
-             <button onClick={handleSendLocationAlert} disabled={!primaryContact} className="dock-btn secondary" style={{ background: 'white' }}>
-               Share Location
-             </button>
-             <button onClick={handleFindHospitals} className="dock-btn secondary" style={{ background: 'white' }}>
-               Find Hospital
-             </button>
+          <div className="navbar-brand-text">
+            <span className="navbar-title">Sankat.Ai</span>
+            <span className="navbar-subtitle">Emergency Response</span>
           </div>
-          <button 
-             onClick={() => setIsEmergency(false)}
-             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', width: '100%', marginTop: '10px', cursor: 'pointer' }}
-          >
-             Dismiss
-          </button>
-        </section>
-      )}
+        </div>
+        <div className="navbar-actions">
+          <Link to="/onboarding" className="navbar-link">Edit Profile</Link>
+        </div>
+      </nav>
 
-      {/* --- MAIN GRID --- */}
-      <div className="form-grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
-        
-        {/* LEFT: INFO CARDS */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-           
-           {/* Medical ID */}
-           <div className="onboarding-section" style={{ padding: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                 <h3>Medical ID</h3>
-                 <button onClick={() => handleShare('Medical ID', medicalInfoText, setMedicalNotice)} className="ghost-button">Share</button>
+      <div className="dashboard-content">
+
+        {/* Emergency Panel */}
+        {isEmergency && (
+          <section className="emergency-panel">
+            <div>
+              <h2>⚠️ Possible Emergency</h2>
+              <p>Risk Score: <strong>{riskScore}</strong></p>
+            </div>
+
+            <div className="emergency-actions">
+              <a href="tel:108" className="action-btn danger" style={{ textDecoration: 'none' }}>
+                📞 Call Ambulance
+              </a>
+              <button onClick={handleCallContact} disabled={!primaryContact} className="action-btn outline">
+                📱 Call Contact
+              </button>
+              <button onClick={handleSendLocationAlert} disabled={!primaryContact} className="action-btn outline">
+                📍 Share Location
+              </button>
+              <button onClick={handleFindHospitals} className="action-btn outline">
+                🏥 Find Hospital
+              </button>
+            </div>
+            <button onClick={() => setIsEmergency(false)} className="dismiss-btn">
+              Dismiss
+            </button>
+          </section>
+        )}
+
+        {/* Main Grid */}
+        <div className="dashboard-grid">
+
+          {/* Left: Patient + Medical Summary */}
+          <div className="info-cards">
+
+            {/* Compact Patient Card */}
+            <div className="patient-card-compact">
+              <div className="patient-compact-row">
+                <div>
+                  <span className="progress-label">PATIENT</span>
+                  <h3 className="patient-compact-name">{medicalCard.fullName || 'Guest'}</h3>
+                </div>
+                <div className="patient-compact-blood">
+                  <span className="progress-label">BLOOD</span>
+                  <span className="blood-badge-sm">{medicalCard.bloodGroup || '?'}</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                 <div><small className="progress-label">ALLERGIES</small><p style={{ margin: 0 }}>{medicalCard.allergies || 'None'}</p></div>
-                 <div><small className="progress-label">CONDITIONS</small><p style={{ margin: 0 }}>{medicalCard.conditions || 'None'}</p></div>
-                 <div><small className="progress-label">MEDS</small><p style={{ margin: 0 }}>{medicalCard.medications || 'None'}</p></div>
+            </div>
+
+            <span className="sidebar-label">Medical Summary</span>
+
+            {/* Medical ID */}
+            <div className="info-card">
+              <div className="info-card-header">
+                <h3><span className="card-icon">🩺</span> Medical ID</h3>
+                <button onClick={() => handleShare('Medical ID', medicalInfoText, setMedicalNotice)} className="ghost-button">Share</button>
+              </div>
+              <div className="info-card-row">
+                <small>ALLERGIES</small>
+                <p>{medicalCard.allergies || 'None'}</p>
+              </div>
+              <div className="info-card-row">
+                <small>CONDITIONS</small>
+                <p>{medicalCard.conditions || 'None'}</p>
+              </div>
+              <div className="info-card-row">
+                <small>MEDICATIONS</small>
+                <p>{medicalCard.medications || 'None'}</p>
               </div>
               {medicalNotice && <small style={{ color: 'green', display: 'block', marginTop: '5px' }}>{medicalNotice}</small>}
-           </div>
+            </div>
 
-           {/* Insurance */}
-           <div className="onboarding-section" style={{ padding: '16px' }}>
-              <h3>Insurance</h3>
-              <div><small className="progress-label">PROVIDER</small><p style={{ margin: 0 }}>{insuranceInfo.provider || 'N/A'}</p></div>
-              <div><small className="progress-label">POLICY #</small><p style={{ margin: 0 }}>{insuranceInfo.policyNumber || 'N/A'}</p></div>
-           </div>
-        </div>
+            {/* Insurance */}
+            <div className="info-card">
+              <div className="info-card-header">
+                <h3><span className="card-icon">🛡️</span> Insurance</h3>
+              </div>
+              <div className="info-card-row">
+                <small>PROVIDER</small>
+                <p>{insuranceInfo.provider || 'N/A'}</p>
+              </div>
+              <div className="info-card-row">
+                <small>POLICY #</small>
+                <p>{insuranceInfo.policyNumber || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
 
-        {/* RIGHT: CHAT */}
-        <div className="onboarding-section" style={{ display: 'flex', flexDirection: 'column', height: '600px', padding: '0' }}>
-           <div style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
-              <h3 style={{margin:0}}>AI Triage</h3>
-              <small style={{color:'gray'}}>Describe symptoms for guidance</small>
-           </div>
-           
-           {/* Messages */}
-           <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {/* Right: Chat — PRIMARY FEATURE */}
+          <div className="chat-panel">
+            <div className="chat-header">
+              <h3>🤖 AI Triage</h3>
+              <small>Describe symptoms for guidance</small>
+            </div>
+
+            {/* Messages */}
+            <div className="chat-messages">
               {messages.length === 0 && (
-                  <div style={{ textAlign: 'center', marginTop: '50px', color: '#9CA3AF' }}>
-                      <span style={{ fontSize: '2rem' }}>🩺</span>
-                      <p>Type symptoms or tap Mic to speak</p>
-                  </div>
+                <div className="chat-empty">
+                  <span>🩺</span>
+                  <p>Type symptoms or tap Mic to speak</p>
+                </div>
               )}
-              
-              {messages.map((msg) => (
-                 <div key={msg.id} style={{ alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-                    <div style={{ 
-                       padding: '12px 16px', borderRadius: '16px', 
-                       background: msg.sender === 'user' ? 'var(--primary)' : '#F3F4F6',
-                       color: msg.sender === 'user' ? 'white' : '#1F2937',
-                       boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-                    }}>
-                       <p style={{margin:0, whiteSpace: 'pre-wrap'}}>{msg.text}</p>
-                    </div>
-                 </div>
-              ))}
-              {isLoading && <small style={{ marginLeft: '10px', color: 'gray' }}>Analyzing...</small>}
-           </div>
 
-           {/* ⚡ NEW CHAT INPUT DOCK (SVG ICONS) */}
-           <form onSubmit={handleSend} style={{ 
-               padding: '12px', 
-               borderTop: '1px solid var(--border-subtle)', 
-               display: 'flex', 
-               alignItems: 'center', 
-               gap: '8px' 
-           }}>
-              {/* INPUT FIELD */}
-              <input 
-                 type="text" 
-                 value={input} 
-                 onChange={(e) => setInput(e.target.value)} 
-                 placeholder={isListening ? "Listening..." : "Type symptoms..."}
-                 style={{ 
-                     flex: 1, padding: '12px 16px', borderRadius: '24px',
-                     border: '1px solid var(--border-subtle)', outline: 'none',
-                     background: '#F9FAFB'
-                 }}
+              {messages.map((msg) => (
+                <div key={msg.id} className={`chat-bubble-wrapper ${msg.sender}`}>
+                  <div className={`chat-bubble ${msg.sender}`}>
+                    <p>{msg.text}</p>
+                  </div>
+                </div>
+              ))}
+              {isStreaming && streamingText && (
+                <div className="chat-bubble-wrapper bot">
+                  <div className="chat-bubble bot">
+                    <p>{streamingText}<span className="streaming-cursor">|</span></p>
+                  </div>
+                </div>
+              )}
+              {isLoading && !isStreaming && <div className="chat-loading">Analyzing...</div>}
+            </div>
+
+            {/* Chat Input */}
+            <form onSubmit={handleSend} className="chat-input-bar">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={isListening ? "Listening..." : "Type symptoms..."}
               />
 
-              {/* 🎤 MIC BUTTON (SVG) */}
-              <button 
+              {/* Mic Button */}
+              <button
                 type="button"
                 onClick={() => setIsVoiceMode(!isVoiceMode)}
-                style={{
-                    width: '44px', height: '44px', borderRadius: '50%',
-                    border: 'none', cursor: 'pointer',
-                    background: isVoiceMode ? '#FEE2E2' : '#F3F4F6', // Red tint if active
-                    color: isVoiceMode ? '#DC2626' : '#6B7280',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'all 0.2s'
-                }}
+                className={`icon-btn mic ${isVoiceMode ? 'active' : ''}`}
                 title="Toggle Voice"
               >
-                 {/* SVG Microphone Icon */}
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                 </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
               </button>
 
-              {/* ➤ SEND BUTTON (SVG) */}
-              <button 
-                type="submit" 
-                disabled={isLoading} 
-                style={{ 
-                    width: '44px', height: '44px', borderRadius: '50%',
-                    border: 'none', cursor: 'pointer',
-                    background: 'var(--primary)', color: 'white',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
-                }}
+              {/* Send Button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="icon-btn send"
               >
-                 {/* SVG Send/PaperPlane Icon */}
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'rotate(45deg) translateX(-2px)' }}>
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                 </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'rotate(45deg) translateX(-2px)' }}>
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
               </button>
-           </form>
-        </div>
+            </form>
+          </div>
 
+        </div>
       </div>
+
+      {/* Footer */}
+      <footer className="app-footer">
+        <div className="footer-content">
+          <div className="footer-brand">
+            <span className="footer-cross">✚</span> Sankat.Ai
+          </div>
+          <hr className="footer-divider" />
+          <p className="footer-text">
+            AI-powered emergency triage. Not a substitute for professional medical advice.
+          </p>
+          <p className="footer-text">
+            © 2026 Sankat.Ai — All data stored locally on your device.
+          </p>
+        </div>
+      </footer>
 
       {hospitalError && (
         <div style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', background: 'black', color: 'white', padding: '10px 20px', borderRadius: '20px', zIndex: 2000 }}>
-           {hospitalError}
+          {hospitalError}
         </div>
       )}
 
-      {/* FLOATING SOS BUTTON */}
-      <button 
+      {/* Floating SOS Button */}
+      <button
         className="sos-floating-btn"
         onClick={() => setIsEmergency(true)}
       >

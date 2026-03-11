@@ -27,7 +27,7 @@ const getValue = (obj, path) => {
 
 function Onboarding() {
   const navigate = useNavigate()
-  
+
   // ✅ STATE
   const [profile, setProfile] = useState(defaultProfile)
   const [errors, setErrors] = useState({})
@@ -38,12 +38,12 @@ function Onboarding() {
     // 1. Create a "Guest" profile satisfying ALL App.jsx checks
     const guestProfile = {
       ...defaultProfile,
-      personal: { 
-        fullName: 'Guest User', 
-        age: '0', 
-        gender: 'Prefer not to say', 
+      personal: {
+        fullName: 'Guest User',
+        age: '0',
+        gender: 'Prefer not to say',
         bloodGroup: 'Unknown', // 👈 CRITICAL FIX
-        phone: '0000000000' 
+        phone: '0000000000'
       },
       contacts: [
         { id: 'ems', name: 'Emergency Services', relationship: 'Service', phone: '112' }
@@ -53,11 +53,11 @@ function Onboarding() {
     // 2. Save Guest Data
     localStorage.setItem('profileData', JSON.stringify(guestProfile))
     localStorage.setItem('profileCompleted', 'true')
-    
+
     // 3. Sync Legacy Keys
     localStorage.setItem('emergencyContacts', JSON.stringify(guestProfile.contacts))
-    localStorage.setItem('medicalCard', JSON.stringify({ 
-        data: { ...guestProfile.personal, ...guestProfile.medical } 
+    localStorage.setItem('medicalCard', JSON.stringify({
+      data: { ...guestProfile.personal, ...guestProfile.medical }
     }))
 
     // 4. Force Navigation
@@ -105,8 +105,8 @@ function Onboarding() {
   const handleAddContact = (e) => {
     e.preventDefault()
     if (!contactDraft.name.trim() || !contactDraft.phone.trim()) {
-        setErrors(prev => ({...prev, contacts: "Name and Phone are required"}))
-        return 
+      setErrors(prev => ({ ...prev, contacts: "Name and Phone are required" }))
+      return
     }
     setProfile((prev) => ({
       ...prev,
@@ -116,7 +116,7 @@ function Onboarding() {
       ],
     }))
     setContactDraft({ name: '', relationship: '', phone: '' })
-    setErrors(prev => ({...prev, contacts: null}))
+    setErrors(prev => ({ ...prev, contacts: null }))
   }
 
   const handleRemoveContact = (id) => {
@@ -127,25 +127,29 @@ function Onboarding() {
   }
 
   const handleSave = () => {
-    const required = ['personal.fullName', 'personal.age', 'personal.phone']
+    const required = ['personal.fullName', 'personal.age', 'personal.phone', 'personal.bloodGroup']
     const newErrors = {}
     required.forEach(path => {
-        if(!getValue(profile, path)) newErrors[path] = 'Required'
+      if (!getValue(profile, path)) newErrors[path] = 'Required'
     })
+
+    if (profile.contacts.length === 0) {
+      newErrors['contacts'] = 'At least one emergency contact is required'
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors)
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
-    
+
     // ✅ SAVE REAL DATA
     localStorage.setItem('profileData', JSON.stringify(profile))
     localStorage.setItem('profileCompleted', 'true')
-    
+
     localStorage.setItem('emergencyContacts', JSON.stringify(profile.contacts))
-    localStorage.setItem('medicalCard', JSON.stringify({ 
-        data: { ...profile.personal, ...profile.medical } 
+    localStorage.setItem('medicalCard', JSON.stringify({
+      data: { ...profile.personal, ...profile.medical }
     }))
     localStorage.setItem('insuranceInfo', JSON.stringify(profile.insurance))
 
@@ -157,45 +161,81 @@ function Onboarding() {
       <Header />
 
       <main style={{ paddingBottom: '140px' }}>
-        <PersonalInfo 
-          data={profile.personal} 
-          onChange={handleSectionChange('personal')} 
-          errors={errors} 
+        {/* Hero Card */}
+        <div className="onboarding-hero">
+          <div className="onboarding-hero-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.25 4.53l-6.72 3.36a2 2 0 00-1.03 1.57v4.61c0 4.15 2.62 7.89 6.46 9.2a2 2 0 001.28 0c3.84-1.31 6.46-5.05 6.46-9.2v-4.6a2 2 0 00-1.03-1.58l-6.72-3.36a2 2 0 00-1.78 0z" />
+              <path fillRule="evenodd" d="M12 7.5a.75.75 0 01.75.75v3h3a.75.75 0 010 1.5h-3v3a.75.75 0 01-1.5 0v-3h-3a.75.75 0 010-1.5h3v-3A.75.75 0 0112 7.5z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <h2>Emergency Profile</h2>
+          <p>
+            Setup your vital info for AI assessment. Details are encrypted locally and only shared when you trigger an emergency.
+          </p>
+          <div className="privacy-badge">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
+            </svg>
+            Offline & Secure on Device
+          </div>
+        </div>
+
+        <PersonalInfo
+          data={profile.personal}
+          onChange={handleSectionChange('personal')}
+          errors={errors}
         />
-        <MedicalInfo 
-          data={profile.medical} 
-          onChange={handleSectionChange('medical')} 
+        <MedicalInfo
+          data={profile.medical}
+          onChange={handleSectionChange('medical')}
         />
-        <Contacts 
-          contacts={profile.contacts} 
+        <Contacts
+          contacts={profile.contacts}
           draft={contactDraft}
           onDraftChange={handleContactDraftChange}
           onAdd={handleAddContact}
           onRemove={handleRemoveContact}
-          errors={errors} 
+          errors={errors}
         />
-        <InsuranceInfo 
-          data={profile.insurance} 
-          onChange={handleSectionChange('insurance')} 
-          errors={errors} 
+        <InsuranceInfo
+          data={profile.insurance}
+          onChange={handleSectionChange('insurance')}
+          errors={errors}
         />
-        <RiskProfile 
-          data={profile.risk} 
-          onChange={handleSectionChange('risk')} 
+        <RiskProfile
+          data={profile.risk}
+          onChange={handleSectionChange('risk')}
         />
       </main>
 
-      {/* ⚡ FLOATING DOCK */}
+      {/* Footer */}
+      <footer className="app-footer">
+        <div className="footer-content">
+          <div className="footer-brand">
+            <span className="footer-cross">✚</span> Sankat.Ai
+          </div>
+          <hr className="footer-divider" />
+          <p className="footer-text">
+            AI-powered emergency triage. Not a substitute for professional medical advice.
+          </p>
+          <p className="footer-text">
+            © 2026 Sankat.Ai — All data stored locally on your device.
+          </p>
+        </div>
+      </footer>
+
+      {/* Floating Dock */}
       <div className="bottom-dock">
         <button onClick={handleSkip} className="dock-btn secondary">Skip</button>
-        
+
         <div className="dock-progress-wrapper">
           <span className="dock-percent">{completion}%</span>
           <div className="dock-track">
             <div className="dock-fill" style={{ width: `${completion}%` }} />
           </div>
         </div>
-        
+
         <button onClick={handleSave} className="dock-btn primary">Save</button>
       </div>
     </div>

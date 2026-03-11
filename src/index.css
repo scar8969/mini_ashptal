@@ -1,37 +1,38 @@
+/* === GLOBAL RESET === */
+
 :root {
-  font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: "Inter", "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  /* 👇 CHANGED: Light Mode settings */
   color-scheme: light;
-  background-color: #F9FAFB; /* Light Gray Background */
-  
+  background-color: #F9FAFB;
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* 👇 CHANGED: Text Colors (Dark text for readability) */
-  --text-primary: #111827; /* Deep Black/Gray */
-  --text-muted: #6B7280;   /* Soft Gray */
+  /* Text */
+  --text-primary: #111827;
+  --text-muted: #6B7280;
 
-  /* 👇 CHANGED: Surfaces (White cards instead of dark) */
-  --surface-1: #FFFFFF;    /* Pure White */
-  --surface-2: #F3F4F6;    /* Light Gray */
-  --surface-3: #E5E7EB;    /* Borders/Dividers */
+  /* Surfaces */
+  --surface-1: #FFFFFF;
+  --surface-2: #F3F4F6;
+  --surface-3: #E5E7EB;
   --border-subtle: #E5E7EB;
 
-  /* 👇 CHANGED: Red & Green Accents (Tweaked for White BG) */
-  --accent: #DC2626;       /* Fire Engine Red */
-  --accent-soft: rgba(220, 38, 38, 0.1); /* Light Red BG */
-  
+  /* Accent — Red Cross Red */
+  --accent: #DC2626;
+  --accent-soft: rgba(220, 38, 38, 0.08);
+
   --danger: #DC2626;
   --danger-hover: #B91C1C;
-  
+
   --success: #059669;
-  --success-soft: #D1FAE5; /* Mint Green BG */
-  
+  --success-soft: #D1FAE5;
+
   --warning: #D97706;
 }
 
@@ -41,28 +42,56 @@
   box-sizing: border-box;
 }
 
+/* Smooth scrolling globally */
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  /* 👇 CHANGED: Removed Dark Gradients, kept it clean */
-  background-color: var(--surface-2); 
+  background-color: var(--surface-2);
   color: var(--text-primary);
 }
 
 #root {
   min-height: 100vh;
-  /* Optional: Center content slightly */
   display: flex;
   flex-direction: column;
 }
 
 input,
 button,
-textarea {
+textarea,
+select {
   font-family: inherit;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* Selection color — Red Cross theme */
+::selection {
+  background: rgba(220, 38, 38, 0.15);
+  color: var(--text-primary);
+}
+
+/* Custom scrollbar — thin, themed */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 38, 38, 0.25);
 }

@@ -13,7 +13,7 @@ export default function PersonalInfo({ data, onChange, errors }) {
           <p>Core details shown on dashboard.</p>
         </div>
       </div>
-      
+
       <div className="form-grid">
         <div className="field">
           {/* 👇 Red Asterisk */}
@@ -35,7 +35,7 @@ export default function PersonalInfo({ data, onChange, errors }) {
             onChange={handleChange('age')}
             placeholder="e.g. 25"
           />
-           {getErr('age') && <span className="field-error">{getErr('age')}</span>}
+          {getErr('age') && <span className="field-error">{getErr('age')}</span>}
         </div>
 
         <div className="field">
@@ -47,6 +47,22 @@ export default function PersonalInfo({ data, onChange, errors }) {
             <option value="Non-binary">Non-binary</option>
           </select>
           {getErr('gender') && <span className="field-error">{getErr('gender')}</span>}
+        </div>
+
+        <div className="field">
+          <label>Blood Group <span className="req">*</span></label>
+          <select value={data.bloodGroup} onChange={handleChange('bloodGroup')}>
+            <option value="">Select blood group</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+          </select>
+          {getErr('bloodGroup') && <span className="field-error">{getErr('bloodGroup')}</span>}
         </div>
 
         <div className="field">
