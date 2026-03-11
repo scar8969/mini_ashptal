@@ -99,12 +99,13 @@ const localAnalyze = (text) => {
   })
 }
 
-const analyzeSymptoms = async (history) => {
+// 🚀 INJECTED PATIENT PROFILE INTO API REQUEST
+const analyzeSymptoms = async (history, patientProfile) => {
   try {
     const response = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({ messages: history, patientProfile }), 
     })
 
     if (!response.ok) throw new Error('API unavailable')
@@ -125,6 +126,14 @@ const safeParse = (value, fallback) => {
   } catch {
     return fallback
   }
+}
+
+// Helper to render **bold** text manually without a markdown library
+const formatTextWithBold = (text) => {
+  if (!text) return null;
+  return text.split('**').map((part, index) => 
+    index % 2 === 1 ? <strong key={index}>{part}</strong> : part
+  );
 }
 
 // --- MAIN COMPONENT ---
@@ -149,18 +158,33 @@ function EmergencyDashboard() {
   const [insuranceNotice, setInsuranceNotice] = useState('')
   const [isInsuranceVisible, setIsInsuranceVisible] = useState(false)
 
+  // Added 'age' to the medical card state
   const [medicalCard, setMedicalCard] = useState({
-    fullName: '', bloodGroup: '', allergies: '', medications: '',
+    fullName: '', age: '', bloodGroup: '', allergies: '', medications: '',
     conditions: '', emergencyContact: '', insurance: '',
   })
   const [medicalNotice, setMedicalNotice] = useState('')
 
-  // Streaming state for word-by-word bot replies
+  // Streaming states
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingMeta, setStreamingMeta] = useState(null)
   const streamingRef = useRef(null)
 
+  // 🎯 NEW: Ref specifically for the chat container to keep scrolling internal
+  const chatContainerRef = useRef(null)
+  
+  // Track if we've sent the initial greeting
+  const [hasGreeted, setHasGreeted] = useState(false)
+
   // --- EFFECTS ---
+
+  // 🎯 NEW: Scroll ONLY the chat container to its bottom
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
+  }, [messages, streamingText])
 
   useEffect(() => {
     const stored = localStorage.getItem('emergencyContacts')
@@ -187,6 +211,33 @@ function EmergencyDashboard() {
       if (parsed && typeof parsed === 'object') setInsuranceInfo((prev) => ({ ...prev, ...parsed }))
     }
   }, [])
+
+  // 🎯 NEW: Automatic Greeting Logic (Guest vs User) with Bold Formatting
+  useEffect(() => {
+    if (!hasGreeted && medicalCard.fullName !== '') {
+      
+      let greetingText = ''
+      const isGuest = medicalCard.fullName.toLowerCase().includes('guest')
+
+      if (isGuest) {
+        greetingText = "**Hey there, Guest!** 🚨\n\nI'm **Sankat AI**, your emergency triage assistant. Since you're using a Guest account, I don't have your medical history on file.\n\nPlease describe your symptoms, and mention your **age** and any **pre-existing conditions** so I can accurately assess your situation."
+      } else {
+        const blood = medicalCard.bloodGroup || 'Unknown'
+        const conds = medicalCard.conditions || 'None listed'
+        const allergies = medicalCard.allergies || 'None listed'
+        const age = medicalCard.age || 'Unknown'
+        
+        greetingText = `**Hi ${medicalCard.fullName}!** 🚨\n\nI'm **Sankat AI**, your triage assistant.\n\nI have your chart loaded:\n• **Age**: ${age}\n• **Blood Type**: ${blood}\n• **Conditions**: ${conds}\n• **Allergies**: ${allergies}\n\n**How can I help you today?** Please describe any symptoms you're experiencing.`
+      }
+
+      const welcomeMessage = { id: Date.now(), sender: 'bot', text: greetingText, severity: null }
+      
+      setTimeout(() => {
+        setMessages([welcomeMessage])
+        setHasGreeted(true)
+      }, 500)
+    }
+  }, [medicalCard, hasGreeted])
 
   useEffect(() => {
     if (insuranceNotice) {
@@ -237,7 +288,9 @@ function EmergencyDashboard() {
   const speakText = (text) => {
     if (!isVoiceMode || !text || !window.speechSynthesis) return
     window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
+    // Strip bold asterisks for clean speech
+    const cleanText = text.replace(/\*\*/g, '')
+    const utterance = new SpeechSynthesisUtterance(cleanText)
     window.speechSynthesis.speak(utterance)
   }
 
@@ -261,28 +314,39 @@ function EmergencyDashboard() {
         role: m.sender === 'user' ? 'user' : 'assistant', content: m.text
       }))
 
-      const responseText = await analyzeSymptoms(history)
+      // 🚀 Pass medicalCard so the AI knows the patient's context
+      const responseText = await analyzeSymptoms(history, medicalCard)
+      
       let parsed = null
       try { parsed = JSON.parse(responseText) } catch { parsed = null }
 
-      let botText = 'I could not generate guidance right now.'
+      let botMessage = { id: Date.now() + 1, sender: 'bot', text: 'I could not generate guidance right now.' }
 
       if (parsed?.followUpQuestions?.length) {
-        botText = parsed.followUpQuestions.join(' ')
+        botMessage.text = parsed.followUpQuestions.join(' ')
       } else if (parsed?.severity && typeof parsed?.riskScore === 'number') {
         const riskScore = Math.max(0, Math.min(100, Math.round(parsed.riskScore)))
-        botText = `Severity: ${parsed.severity} \nRiskScore: ${riskScore} \nAdvice: ${parsed.advice || ''} `
+        
+        // 🚀 Keeping the data separated for the sleek banner
+        botMessage = {
+          ...botMessage,
+          text: parsed.advice || '',
+          severity: parsed.severity,
+          riskScore: riskScore
+        }
+        
         setLastRiskScore(riskScore)
         if (parsed.severity === 'EMERGENCY') setIsEmergency(true)
       }
 
-      const botMessage = { id: Date.now() + 1, sender: 'bot', text: botText }
-
       // Stream word-by-word
-      const words = botText.split(' ')
+      const words = botMessage.text.split(' ')
       let wordIndex = 0
       setIsStreaming(true)
       setStreamingText('')
+      
+      // 🚀 Lock in the top banner data before streaming starts
+      setStreamingMeta({ severity: botMessage.severity, riskScore: botMessage.riskScore })
 
       streamingRef.current = setInterval(() => {
         wordIndex++
@@ -292,8 +356,9 @@ function EmergencyDashboard() {
           streamingRef.current = null
           setIsStreaming(false)
           setStreamingText('')
+          setStreamingMeta(null) // Clear meta when done
           setMessages((prev) => [...prev, botMessage])
-          speakText(botText)
+          speakText(botMessage.text)
         }
       }, 60)
     } catch (error) {
@@ -307,7 +372,7 @@ function EmergencyDashboard() {
   const selectedContact = contacts.find((c) => c.id === selectedContactId)
   const primaryContact = selectedContact || contacts[0]
 
-  const handleCallContact = () => primaryContact && (window.location.href = `tel:${primaryContact.phone} `)
+  const handleCallContact = () => primaryContact && (window.location.href = `tel:${primaryContact.phone}`)
 
   const handleFindHospitals = () => {
     if (!navigator.geolocation) return setHospitalError('Geolocation not supported.')
@@ -333,7 +398,8 @@ function EmergencyDashboard() {
 
   const medicalInfoText = useMemo(() => {
     const contactLine = primaryContact ? `${primaryContact.name} (${primaryContact.phone})` : medicalCard.emergencyContact
-    return `Name: ${medicalCard.fullName}\nBlood: ${medicalCard.bloodGroup}\nAllergies: ${medicalCard.allergies}\nConditions: ${medicalCard.conditions}\nMeds: ${medicalCard.medications}\nContact: ${contactLine}\nIns: ${insuranceInfo.provider}`
+    // Included age in the string export
+    return `Name: ${medicalCard.fullName}\nAge: ${medicalCard.age || 'N/A'}\nBlood: ${medicalCard.bloodGroup}\nAllergies: ${medicalCard.allergies}\nConditions: ${medicalCard.conditions}\nMeds: ${medicalCard.medications}\nContact: ${contactLine}\nIns: ${insuranceInfo.provider}`
   }, [medicalCard, insuranceInfo, primaryContact])
 
   const handleCopy = async (text, setNotice) => {
@@ -414,7 +480,9 @@ function EmergencyDashboard() {
               <div className="patient-compact-row">
                 <div>
                   <span className="progress-label">PATIENT</span>
-                  <h3 className="patient-compact-name">{medicalCard.fullName || 'Guest'}</h3>
+                  <h3 className="patient-compact-name">
+                    {medicalCard.fullName || 'Guest'}
+                  </h3>
                 </div>
                 <div className="patient-compact-blood">
                   <span className="progress-label">BLOOD</span>
@@ -470,7 +538,8 @@ function EmergencyDashboard() {
             </div>
 
             {/* Messages */}
-            <div className="chat-messages">
+            {/* 🎯 NEW: Added ref here to control internal scrollbar */}
+            <div className="chat-messages" ref={chatContainerRef}>
               {messages.length === 0 && (
                 <div className="chat-empty">
                   <span>🩺</span>
@@ -480,15 +549,60 @@ function EmergencyDashboard() {
 
               {messages.map((msg) => (
                 <div key={msg.id} className={`chat-bubble-wrapper ${msg.sender}`}>
-                  <div className={`chat-bubble ${msg.sender}`}>
-                    <p>{msg.text}</p>
+                  {/* Removes padding if there's a banner, so the banner touches the edges */}
+                  <div className={`chat-bubble ${msg.sender}`} style={{ padding: msg.severity ? '0' : '', overflow: 'hidden' }}>
+                    
+                    {/* THE CUSTOM CUTOUT BANNER */}
+                    {msg.severity && (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        background: 'var(--accent-soft)', 
+                        color: 'var(--danger)', 
+                        padding: '6px 12px', 
+                        fontSize: '0.75rem', 
+                        fontWeight: 'bold', 
+                        letterSpacing: '0.5px',
+                        borderBottom: '1px solid rgba(220, 38, 38, 0.2)' 
+                      }}>
+                        <span>SEVERITY: {msg.severity}</span>
+                        <span>RISK SCORE: {msg.riskScore}</span>
+                      </div>
+                    )}
+                    
+                    <div style={{ padding: msg.severity ? '10px 14px' : '' }}>
+                      <p style={{ margin: 0 }}>{formatTextWithBold(msg.text)}</p>
+                    </div>
                   </div>
                 </div>
               ))}
+              
+              {/* STREAMING MESSAGE BUBBLE */}
               {isStreaming && streamingText && (
                 <div className="chat-bubble-wrapper bot">
-                  <div className="chat-bubble bot">
-                    <p>{streamingText}<span className="streaming-cursor">|</span></p>
+                  <div className="chat-bubble bot" style={{ padding: streamingMeta?.severity ? '0' : '', overflow: 'hidden' }}>
+                    
+                    {/* Shows the banner instantly before text finishes streaming */}
+                    {streamingMeta?.severity && (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        background: 'var(--accent-soft)', 
+                        color: 'var(--danger)', 
+                        padding: '6px 12px', 
+                        fontSize: '0.75rem', 
+                        fontWeight: 'bold', 
+                        letterSpacing: '0.5px',
+                        borderBottom: '1px solid rgba(220, 38, 38, 0.2)' 
+                      }}>
+                        <span>SEVERITY: {streamingMeta.severity}</span>
+                        <span>RISK SCORE: {streamingMeta.riskScore}</span>
+                      </div>
+                    )}
+
+                    <div style={{ padding: streamingMeta?.severity ? '10px 14px' : '' }}>
+                      <p style={{ margin: 0 }}>{formatTextWithBold(streamingText)}<span className="streaming-cursor">|</span></p>
+                    </div>
                   </div>
                 </div>
               )}

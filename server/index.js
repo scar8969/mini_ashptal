@@ -1,5 +1,6 @@
 import express from 'express'
 import dotenv from 'dotenv'
+import cors from 'cors'
 import { analyzeSymptoms } from './openai.js'
 
 dotenv.config()
@@ -7,15 +8,19 @@ dotenv.config()
 const app = express()
 const port = process.env.PORT || 5174
 
+// Basic security so your frontend can actually talk to this API
+app.use(cors()) 
 app.use(express.json({ limit: '1mb' }))
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({ ok: true, status: 'Sankat AI Backend is Live' })
 })
 
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { messages } = req.body
+    // We now expect the patientProfile from the frontend!
+    const { messages, patientProfile } = req.body 
+
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages is required.' })
     }
@@ -31,24 +36,25 @@ app.post('/api/analyze', async (req, res) => {
       .slice(-8)
 
     if (cleaned.length === 0) {
-      return res.status(400).json({ error: 'messages is required.' })
+      return res.status(400).json({ error: 'Valid messages are required.' })
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'Missing OPENAI_API_KEY.' })
+      return res.status(500).json({ error: 'Missing API Key.' })
     }
 
-    const text = await analyzeSymptoms(cleaned)
+    // Pass BOTH the chat history and the patient's medical data to the AI
+    const text = await analyzeSymptoms(cleaned, patientProfile)
+    
     return res.json({ text })
   } catch (error) {
     console.error('Analyze error:', error)
     return res
       .status(500)
-      .json({ error: 'OpenAI request failed.', detail: error?.message })
+      .json({ error: 'AI request failed.', detail: error?.message })
   }
 })
 
-
 app.listen(port, () => {
-  console.log(`API server listening on http://localhost:${port}`)
+  console.log(`* Sankat AI Backend listening on http://localhost:${port}`)
 })
