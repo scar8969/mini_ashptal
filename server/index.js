@@ -8,37 +8,40 @@ dotenv.config()
 const app = express()
 const port = process.env.PORT || 5174
 
+// Basic security
 app.use(cors()) 
 app.use(express.json({ limit: '1mb' }))
 
-// 🚑 THE OFFLINE PHYSIOLOGICAL FALLBACK ENGINE
-// This guarantees the frontend ALWAYS gets valid JSON, even if OpenAI is dead.
+// 🚑 THE UPGRADED OFFLINE PHYSIOLOGICAL FALLBACK ENGINE
 const emergencyFallbackAnalyze = (messages) => {
-  // Grab the last thing the user said
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || ''
   const lower = lastUserMsg.toLowerCase()
 
   let risk = 10
   let severity = "LOW"
   let advice = "Monitor symptoms closely. If they worsen, consult a doctor."
-  let reasoning = "System offline. Fallback keyword analysis triggered."
+  let reasoning = "Fallback engine: No specific high-risk keywords detected."
 
-  // Map basic physiological red flags
-  if (/(chest|heart|breath|airway|unconscious|faint|choking|stroke|droop)/.test(lower)) {
+  // 1. CRITICAL / EMERGENCY (Risk 95)
+  if (/(chest|heart|breath|airway|unconscious|faint|choke|choking|stroke|droop|poison|overdose|suicide|kill myself|allergic|anaphylaxis|seizure|fit|convulsion)/.test(lower)) {
     risk = 95
     severity = "EMERGENCY"
-    advice = "CRITICAL: Call 108 or your local emergency number IMMEDIATELY."
-    reasoning = "Fallback engine detected critical life-threatening keywords (airway/cardiac/neuro)."
-  } else if (/(blood|bleed|cut|burn|broken|fracture|bone)/.test(lower)) {
+    advice = "CRITICAL: Call 108 or your local emergency number IMMEDIATELY. Do not wait."
+    reasoning = "Fallback engine detected critical life-threatening keywords."
+  
+  // 2. HIGH (Risk 75)
+  } else if (/(blood|bleed|cut|burn|broken|fracture|bone|snake|bite|pregnant|labor|water broke|chemical)/.test(lower)) {
     risk = 75
     severity = "HIGH"
-    advice = "Apply immediate first aid. Proceed to the nearest hospital or urgent care."
-    reasoning = "Fallback engine detected trauma or hemorrhage keywords."
-  } else if (/(fever|cough|headache|vomit|nausea)/.test(lower)) {
+    advice = "Apply immediate first aid if applicable. Proceed to the nearest hospital or urgent care immediately."
+    reasoning = "Fallback engine detected severe trauma or acute urgent conditions."
+  
+  // 3. MODERATE (Risk 35)
+  } else if (/(fever|cough|headache|vomit|nausea|diarrhea|sprain|twist|stomach|rash)/.test(lower)) {
     risk = 35
     severity = "MODERATE"
-    advice = "Rest and stay hydrated. Consider over-the-counter medication."
-    reasoning = "Fallback engine detected moderate viral/systemic symptoms."
+    advice = "Rest and stay hydrated. Consider over-the-counter medication. See a doctor if symptoms persist."
+    reasoning = "Fallback engine detected moderate viral, systemic, or minor physical symptoms."
   }
 
   // Return EXACTLY the JSON schema the frontend expects
@@ -47,8 +50,8 @@ const emergencyFallbackAnalyze = (messages) => {
     followUpQuestions: [],
     severity,
     riskScore: risk,
-    advice,
-    disclaimer: "AI Estimate. Not medical advice. (Generated via Offline Fallback)"
+    advice: advice, // Clean advice, no "SYSTEM ALERT" text here!
+    disclaimer: "OFFLINE MODE: Keyword Estimate. Not medical advice."
   })
 }
 
@@ -78,24 +81,23 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Valid messages are required.' })
     }
 
+    // 🎯 If API key is missing entirely, instantly trigger the fallback with the flag
     if (!process.env.OPENAI_API_KEY) {
       console.warn("⚠️ API Key missing! Triggering Fallback Engine.")
       const fallbackText = emergencyFallbackAnalyze(cleaned)
-      return res.json({ text: fallbackText })
+      return res.json({ text: fallbackText, isOfflineFallback: true }) 
     }
 
-    // Attempt the actual AI call
+    // 🎯 Attempt the actual AI call
     const text = await analyzeSymptoms(cleaned, patientProfile)
-    
-    return res.json({ text })
+    return res.json({ text, isOfflineFallback: false }) // Flag is false, AI worked!
 
   } catch (error) {
     console.error('🚨 OpenAI Analyze error intercepted:', error.message)
     
-    // 🛡️ THE SAFETY NET: If the API times out, fails, or throws a 500, 
-    // we catch it here and send the hardcoded emergency logic instead.
+    // 🎯 If the API times out or fails, catch it and send fallback with the flag
     const fallbackText = emergencyFallbackAnalyze(req.body.messages || [])
-    return res.json({ text: fallbackText })
+    return res.json({ text: fallbackText, isOfflineFallback: true }) 
   }
 })
 

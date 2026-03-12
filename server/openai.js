@@ -1,24 +1,54 @@
 import OpenAI from 'openai'
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 // 🧠 THE UPGRADED CLINICAL SYSTEM PROMPT
 const getSystemPrompt = (profile) => {
-  const patientInfo = profile 
-    ? `Patient Context -> Age: ${profile.age || 'Unknown'}, Gender: ${profile.gender || 'Unknown'}, Blood: ${profile.bloodGroup || 'Unknown'}. Medical History: ${profile.conditions || 'None'}. Allergies: ${profile.allergies || 'None'}. Medications: ${profile.medications || 'None'}.`
-    : 'Patient Context: Unknown.'
+  
+  // 🚀 YOUR FIX: Completely skip age if it's 0 or empty!
+  const ageStr = profile?.age?.toString()
+  const hasValidAge = ageStr && ageStr !== '0' && ageStr.trim() !== ''
+  
+  // Only include the "Age: X" text if it's a real age. Otherwise, leave it completely blank.
+  const ageContext = hasValidAge ? `Age: ${ageStr}, ` : ''
 
-  return `You are Sankat AI, an elite clinical emergency triage system. You evaluate patients using the Emergency Severity Index (ESI) and ABCDE (Airway, Breathing, Circulation, Disability, Exposure) protocols.
+  let gender = profile?.gender
+  if (!gender || gender === 'Prefer not to say' || gender.trim() === '') {
+    gender = 'Unspecified'
+  }
+
+  // Notice how ageContext is dynamically injected. If it's empty, "Age" isn't even mentioned!
+  const patientInfo = profile 
+    ? `Patient Context -> ${ageContext}Gender: ${gender}, Blood: ${profile.bloodGroup || 'Unknown'}. Medical History: ${profile.conditions || 'None'}. Allergies: ${profile.allergies || 'None'}. Medications: ${profile.medications || 'None'}.`
+    : 'Patient Context -> General Adult Patient. Medical History: None.'
+
+  return `You are Sankat AI, an elite clinical emergency triage system. 
 
 ${patientInfo}
 
+CRITICAL DIRECTIVE:
+If no age is explicitly listed in the Patient Context above, you MUST evaluate the patient as a standard, healthy adult. NEVER apply infant or pediatric protocols unless explicitly stated by the user in the chat.
+
 YOUR TRIAGE ALGORITHM:
 1. Identify immediate life threats (Red Flags: compromised airway, severe respiratory distress, uncontrolled hemorrhage, sudden altered mental status, chest pain radiating to arm/jaw).
-2. If Red Flags are present -> IMMEDIATELY classify as EMERGENCY (Risk 90-100). Do NOT ask follow-up questions. Give 1-2 bullet points of immediate life-saving action.
+2. If Red Flags are present -> IMMEDIATELY classify as EMERGENCY (Risk 90-100). Give 1-2 bullet points of immediate life-saving action.
 3. If symptoms are highly concerning but not immediately fatal -> Classify as HIGH (Risk 70-89). Tell them to seek urgent medical care.
-4. If the situation is ambiguous but potentially dangerous -> Output ONLY "followUpQuestions" (1-2 highly specific clinical questions like "Is the pain sharp or dull?"). Leave severity as null.
+4. If the situation is ambiguous but potentially dangerous -> Output ONLY "followUpQuestions". Leave severity as null.
 5. If clearly non-urgent -> Classify as LOW or MODERATE (Risk 0-69). Give home-care advice.
 
 CRITICAL RULE:
-You MUST write out your clinical thought process in the "reasoning" field, connecting the user's symptoms with their Patient Context, BEFORE assigning the severity and score.`
+Write out your clinical thought process in the "reasoning" field BEFORE assigning the severity and score.
+
+OUTPUT STRICTLY THIS JSON FORMAT ONLY:
+{
+  "reasoning": "<Your internal clinical logic>",
+  "followUpQuestions": ["<Question 1 (only if needed)>", "<Question 2 (only if needed)>"],
+  "severity": "LOW" | "MODERATE" | "HIGH" | "EMERGENCY" | null,
+  "riskScore": <integer 0-100>,
+  "advice": "<Direct, actionable advice. Max 3 sentences.>",
+  "disclaimer": "AI Estimate. Not medical advice."
+}`
 }
 
 let cachedClient = null
@@ -33,7 +63,7 @@ const getClient = () => {
 
   cachedClient = new OpenAI({ 
     apiKey: apiKey,
-    // baseURL: 'https://their-custom-proxy.com/v1',
+    timeout: 10000, 
   })
   return cachedClient
 }
@@ -48,50 +78,10 @@ export const analyzeSymptoms = async (messages, patientProfile) => {
 
   try {
     const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o-mini', 
       messages: fullMessages,
-      temperature: 0.1,
-      timeout: 10000, // ⏱️ 10-second timeout. Crucial for emergency apps!
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "triage_assessment",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              reasoning: {
-                type: "string",
-                description: "Internal clinical logic analyzing the symptoms and patient history."
-              },
-              followUpQuestions: {
-                type: "array",
-                items: { type: "string" },
-                description: "Array of 1-2 specific clinical questions. Empty if no follow-up is needed."
-              },
-              severity: {
-                type: ["string", "null"],
-                enum: ["LOW", "MODERATE", "HIGH", "EMERGENCY", null],
-                description: "Triage severity level. Null if more information is needed via followUpQuestions."
-              },
-              riskScore: {
-                type: "integer",
-                description: "Risk score from 0 to 100."
-              },
-              advice: {
-                type: "string",
-                description: "Direct, actionable advice. Max 3 sentences."
-              },
-              disclaimer: {
-                type: "string",
-                description: "Must always be exactly: 'AI Estimate. Not medical advice.'"
-              }
-            },
-            required: ["reasoning", "followUpQuestions", "severity", "riskScore", "advice", "disclaimer"],
-            additionalProperties: false
-          }
-        }
-      }
+      temperature: 0.1, 
+      response_format: { type: "json_object" } 
     })
 
     return response.choices[0].message.content?.trim() || '{}'

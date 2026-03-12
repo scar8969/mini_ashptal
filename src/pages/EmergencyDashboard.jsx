@@ -62,45 +62,37 @@ const FIRST_AID_GUIDES = [
   },
 ]
 
-const getFirstAidGuides = (text) => {
-  if (!text) return []
-  const lowered = text.toLowerCase()
-  return FIRST_AID_GUIDES.filter((guide) =>
-    guide.keywords.some((keyword) => lowered.includes(keyword)),
-  )
-}
-
-// ⚡ SMART LOCAL ANALYSIS (Fallback)
+// ⚡ SMART LOCAL ANALYSIS (Frontend Fallback if Backend is totally dead)
 const localAnalyze = (text) => {
   const lower = text.toLowerCase()
   let risk = 10
   let severity = "LOW"
-  let advice = "Monitor symptoms. Consult a doctor if they persist."
+  let advice = "Monitor symptoms closely. If they worsen, consult a doctor."
 
-  if (lower.includes('chest') || lower.includes('heart') || lower.includes('breathing') || lower.includes('unconscious')) {
+  if (/(chest|heart|breath|airway|unconscious|faint|choke|choking|stroke|droop|poison|overdose|suicide|kill myself|allergic|anaphylaxis|seizure|fit|convulsion)/.test(lower)) {
     risk = 95
     severity = "EMERGENCY"
-    advice = "This sounds critical. Call emergency services immediately."
-  } else if (lower.includes('blood') || lower.includes('cut') || lower.includes('broken') || lower.includes('burn')) {
-    risk = 65
+    advice = "CRITICAL: Call 108 or your local emergency number IMMEDIATELY. Do not wait."
+  } else if (/(blood|bleed|cut|burn|broken|fracture|bone|snake|bite|pregnant|labor|water broke|chemical)/.test(lower)) {
+    risk = 75
     severity = "HIGH"
-    advice = "Apply first aid immediately. Visit a hospital."
-  } else if (lower.includes('fever') || lower.includes('headache') || lower.includes('vomit')) {
-    risk = 30
+    advice = "Apply immediate first aid if applicable. Proceed to the nearest hospital or urgent care immediately."
+  } else if (/(fever|cough|headache|vomit|nausea|diarrhea|sprain|twist|stomach|rash)/.test(lower)) {
+    risk = 35
     severity = "MODERATE"
-    advice = "Stay hydrated and rest. Use OTC medication if needed."
+    advice = "Rest and stay hydrated. Consider over-the-counter medication. See a doctor if symptoms persist."
   }
 
   return JSON.stringify({
     severity,
     riskScore: risk,
-    advice,
-    disclaimer: "AI Estimate. Not medical advice."
+    advice: advice, // Clean advice!
+    disclaimer: "OFFLINE MODE: Keyword Estimate. Not medical advice."
   })
 }
 
 // 🚀 INJECTED PATIENT PROFILE INTO API REQUEST
-const analyzeSymptoms = async (history, patientProfile) => {
+const analyzeSymptoms = async (history, patientProfile, setOfflineStatus) => {
   try {
     const response = await fetch('/api/analyze', {
       method: 'POST',
@@ -109,11 +101,21 @@ const analyzeSymptoms = async (history, patientProfile) => {
     })
 
     if (!response.ok) throw new Error('API unavailable')
-
+    
     const data = await response.json()
+
+    // 🎯 Toggle the banner based on the backend's flag
+    if (data.isOfflineFallback) {
+      setOfflineStatus(true)
+    } else {
+      setOfflineStatus(false)
+    }
+
     return data.text
 
   } catch (err) {
+    // 🎯 If the server is totally dead, turn on banner and run local fallback
+    setOfflineStatus(true)
     const lastUserMessage = history[history.length - 1].content
     return localAnalyze(lastUserMessage)
   }
@@ -128,7 +130,6 @@ const safeParse = (value, fallback) => {
   }
 }
 
-// Helper to render **bold** text manually without a markdown library
 const formatTextWithBold = (text) => {
   if (!text) return null;
   return text.split('**').map((part, index) => 
@@ -150,36 +151,45 @@ function EmergencyDashboard() {
   const [isVoiceMode, setIsVoiceMode] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [lastRiskScore, setLastRiskScore] = useState(null)
+  
+  // 🎯 State for the red pulsing header banner
+  const [isOffline, setIsOffline] = useState(false)
 
   const [insuranceInfo, setInsuranceInfo] = useState({
     provider: '', policyNumber: '', policyHolder: '', relationship: 'Self',
     helpline: '', validTill: '', coverageType: '', tpa: '',
   })
   const [insuranceNotice, setInsuranceNotice] = useState('')
-  const [isInsuranceVisible, setIsInsuranceVisible] = useState(false)
 
-  // Added 'age' to the medical card state
   const [medicalCard, setMedicalCard] = useState({
     fullName: '', age: '', bloodGroup: '', allergies: '', medications: '',
     conditions: '', emergencyContact: '', insurance: '',
   })
   const [medicalNotice, setMedicalNotice] = useState('')
 
-  // Streaming states
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMeta, setStreamingMeta] = useState(null)
   const streamingRef = useRef(null)
 
-  // 🎯 NEW: Ref specifically for the chat container to keep scrolling internal
   const chatContainerRef = useRef(null)
-  
-  // Track if we've sent the initial greeting
   const [hasGreeted, setHasGreeted] = useState(false)
 
   // --- EFFECTS ---
 
-  // 🎯 NEW: Scroll ONLY the chat container to its bottom
+  // 🎯 Initial Health Ping - Turns banner on/off appropriately 
+  useEffect(() => {
+    const checkServer = async () => {
+      try {
+        const res = await fetch('/api/health')
+        setIsOffline(!res.ok) 
+      } catch {
+        setIsOffline(true) 
+      }
+    }
+    checkServer()
+  }, [])
+
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
@@ -212,10 +222,8 @@ function EmergencyDashboard() {
     }
   }, [])
 
-  // 🎯 NEW: Automatic Greeting Logic (Guest vs User) with Bold Formatting
   useEffect(() => {
     if (!hasGreeted && medicalCard.fullName !== '') {
-      
       let greetingText = ''
       const isGuest = medicalCard.fullName.toLowerCase().includes('guest')
 
@@ -288,7 +296,6 @@ function EmergencyDashboard() {
   const speakText = (text) => {
     if (!isVoiceMode || !text || !window.speechSynthesis) return
     window.speechSynthesis.cancel()
-    // Strip bold asterisks for clean speech
     const cleanText = text.replace(/\*\*/g, '')
     const utterance = new SpeechSynthesisUtterance(cleanText)
     window.speechSynthesis.speak(utterance)
@@ -310,12 +317,16 @@ function EmergencyDashboard() {
     setIsLoading(true)
 
     try {
-      const history = [...messages, userMessage].map((m) => ({
-        role: m.sender === 'user' ? 'user' : 'assistant', content: m.text
-      }))
+      // 🎯 FIX: Filter out the welcome message so the AI doesn't read its own greeting and get confused!
+      const history = [...messages, userMessage]
+        .filter((m) => !m.text.includes("I'm **Sankat AI**")) 
+        .map((m) => ({
+          role: m.sender === 'user' ? 'user' : 'assistant', 
+          content: m.text
+        }))
 
-      // 🚀 Pass medicalCard so the AI knows the patient's context
-      const responseText = await analyzeSymptoms(history, medicalCard)
+      // Pass the setIsOffline callback
+      const responseText = await analyzeSymptoms(history, medicalCard, setIsOffline)
       
       let parsed = null
       try { parsed = JSON.parse(responseText) } catch { parsed = null }
@@ -327,7 +338,6 @@ function EmergencyDashboard() {
       } else if (parsed?.severity && typeof parsed?.riskScore === 'number') {
         const riskScore = Math.max(0, Math.min(100, Math.round(parsed.riskScore)))
         
-        // 🚀 Keeping the data separated for the sleek banner
         botMessage = {
           ...botMessage,
           text: parsed.advice || '',
@@ -339,13 +349,11 @@ function EmergencyDashboard() {
         if (parsed.severity === 'EMERGENCY') setIsEmergency(true)
       }
 
-      // Stream word-by-word
       const words = botMessage.text.split(' ')
       let wordIndex = 0
       setIsStreaming(true)
       setStreamingText('')
       
-      // 🚀 Lock in the top banner data before streaming starts
       setStreamingMeta({ severity: botMessage.severity, riskScore: botMessage.riskScore })
 
       streamingRef.current = setInterval(() => {
@@ -356,7 +364,7 @@ function EmergencyDashboard() {
           streamingRef.current = null
           setIsStreaming(false)
           setStreamingText('')
-          setStreamingMeta(null) // Clear meta when done
+          setStreamingMeta(null)
           setMessages((prev) => [...prev, botMessage])
           speakText(botMessage.text)
         }
@@ -398,7 +406,6 @@ function EmergencyDashboard() {
 
   const medicalInfoText = useMemo(() => {
     const contactLine = primaryContact ? `${primaryContact.name} (${primaryContact.phone})` : medicalCard.emergencyContact
-    // Included age in the string export
     return `Name: ${medicalCard.fullName}\nAge: ${medicalCard.age || 'N/A'}\nBlood: ${medicalCard.bloodGroup}\nAllergies: ${medicalCard.allergies}\nConditions: ${medicalCard.conditions}\nMeds: ${medicalCard.medications}\nContact: ${contactLine}\nIns: ${insuranceInfo.provider}`
   }, [medicalCard, insuranceInfo, primaryContact])
 
@@ -420,8 +427,55 @@ function EmergencyDashboard() {
   return (
     <div className="app dashboard">
 
-      {/* Top Navigation Bar */}
+      {/* 🎯 Explicit Server Warning Header */}
       <nav className="top-navbar">
+        <style>{`
+          @keyframes offline-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); transform: scale(0.99); background-color: rgba(220, 38, 38, 0.05); }
+            50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); transform: scale(1.01); background-color: rgba(220, 38, 38, 0.12); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); transform: scale(0.99); background-color: rgba(220, 38, 38, 0.05); }
+          }
+          .badge-offline {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            border-radius: var(--radius-md); 
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            animation: offline-pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            text-align: left;
+          }
+          .badge-offline-icon {
+            color: #DC2626;
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+          }
+          .badge-offline-text {
+            display: flex;
+            flex-direction: column;
+          }
+          .badge-offline-title {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #DC2626;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            line-height: 1.2;
+          }
+          .badge-offline-sub {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: #7F1D1D;
+            line-height: 1.2;
+            margin-top: 2px;
+          }
+          @media (max-width: 600px) {
+            .badge-offline-sub { display: none; }
+            .badge-offline { padding: 6px 12px; }
+          }
+        `}</style>
+        
         <div className="navbar-brand">
           <div className="navbar-brand-icon">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -434,7 +488,22 @@ function EmergencyDashboard() {
             <span className="navbar-subtitle">Emergency Response</span>
           </div>
         </div>
+
         <div className="navbar-actions">
+          {/* 🎯 Explicit Warning Banner */}
+          {isOffline && (
+            <div className="badge-offline">
+              <svg className="badge-offline-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <div className="badge-offline-text">
+                <span className="badge-offline-title">AI Server Down: Basic Backup</span>
+                <span className="badge-offline-sub">Please rely on a doctor for emergencies.</span>
+              </div>
+            </div>
+          )}
           <Link to="/onboarding" className="navbar-link">Edit Profile</Link>
         </div>
       </nav>
@@ -475,7 +544,6 @@ function EmergencyDashboard() {
           {/* Left: Patient + Medical Summary */}
           <div className="info-cards">
 
-            {/* Compact Patient Card */}
             <div className="patient-card-compact">
               <div className="patient-compact-row">
                 <div>
@@ -493,7 +561,6 @@ function EmergencyDashboard() {
 
             <span className="sidebar-label">Medical Summary</span>
 
-            {/* Medical ID */}
             <div className="info-card">
               <div className="info-card-header">
                 <h3><span className="card-icon">🩺</span> Medical ID</h3>
@@ -514,7 +581,6 @@ function EmergencyDashboard() {
               {medicalNotice && <small style={{ color: 'green', display: 'block', marginTop: '5px' }}>{medicalNotice}</small>}
             </div>
 
-            {/* Insurance */}
             <div className="info-card">
               <div className="info-card-header">
                 <h3><span className="card-icon">🛡️</span> Insurance</h3>
@@ -538,7 +604,6 @@ function EmergencyDashboard() {
             </div>
 
             {/* Messages */}
-            {/* 🎯 NEW: Added ref here to control internal scrollbar */}
             <div className="chat-messages" ref={chatContainerRef}>
               {messages.length === 0 && (
                 <div className="chat-empty">
@@ -549,10 +614,8 @@ function EmergencyDashboard() {
 
               {messages.map((msg) => (
                 <div key={msg.id} className={`chat-bubble-wrapper ${msg.sender}`}>
-                  {/* Removes padding if there's a banner, so the banner touches the edges */}
                   <div className={`chat-bubble ${msg.sender}`} style={{ padding: msg.severity ? '0' : '', overflow: 'hidden' }}>
                     
-                    {/* THE CUSTOM CUTOUT BANNER */}
                     {msg.severity && (
                       <div style={{ 
                         display: 'flex', 
@@ -582,7 +645,6 @@ function EmergencyDashboard() {
                 <div className="chat-bubble-wrapper bot">
                   <div className="chat-bubble bot" style={{ padding: streamingMeta?.severity ? '0' : '', overflow: 'hidden' }}>
                     
-                    {/* Shows the banner instantly before text finishes streaming */}
                     {streamingMeta?.severity && (
                       <div style={{ 
                         display: 'flex', 
@@ -618,7 +680,6 @@ function EmergencyDashboard() {
                 placeholder={isListening ? "Listening..." : "Type symptoms..."}
               />
 
-              {/* Mic Button */}
               <button
                 type="button"
                 onClick={() => setIsVoiceMode(!isVoiceMode)}
@@ -633,7 +694,6 @@ function EmergencyDashboard() {
                 </svg>
               </button>
 
-              {/* Send Button */}
               <button
                 type="submit"
                 disabled={isLoading}
@@ -650,7 +710,6 @@ function EmergencyDashboard() {
         </div>
       </div>
 
-      {/* Footer */}
       <footer className="app-footer">
         <div className="footer-content">
           <div className="footer-brand">
@@ -672,7 +731,6 @@ function EmergencyDashboard() {
         </div>
       )}
 
-      {/* Floating SOS Button */}
       <button
         className="sos-floating-btn"
         onClick={() => setIsEmergency(true)}
