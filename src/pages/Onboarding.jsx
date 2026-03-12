@@ -28,8 +28,26 @@ const getValue = (obj, path) => {
 function Onboarding() {
   const navigate = useNavigate()
 
-  // ✅ STATE
-  const [profile, setProfile] = useState(defaultProfile)
+  // ✅ STATE — restore saved profile from localStorage if it exists
+  const [profile, setProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('profileData')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        // Merge with defaultProfile so any new/missing keys still have defaults
+        return {
+          personal: { ...defaultProfile.personal, ...parsed.personal },
+          medical: { ...defaultProfile.medical, ...parsed.medical },
+          contacts: Array.isArray(parsed.contacts) ? parsed.contacts : defaultProfile.contacts,
+          insurance: { ...defaultProfile.insurance, ...parsed.insurance },
+          risk: { ...defaultProfile.risk, ...parsed.risk },
+        }
+      }
+    } catch {
+      // If parsing fails, fall through to default
+    }
+    return defaultProfile
+  })
   const [errors, setErrors] = useState({})
   const [contactDraft, setContactDraft] = useState({ name: '', relationship: '', phone: '' })
 
