@@ -1,0 +1,33 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+    container_name: sankatai-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    networks:
+      - sankatai-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:5174/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  frontend:
+    build:
+      context: ./frontend
+    container_name: sankatai-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - sankatai-network
+
+networks:
+  sankatai-network:
+    driver: bridge

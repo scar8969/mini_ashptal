@@ -87,8 +87,8 @@ This document lists the observable functionality of the project based on the cur
   - `GET /api/health` returns `{ ok: true }`.
   - `POST /api/analyze` accepts `{ messages: [...] }` and returns `{ text: "..." }`.
 - Serverless API folder (for Vercel-style deployments):
-  - `api/health.js` (health check).
-  - `api/analyze.js` (same analysis flow as Express).
+  - `backend/api/health.js` (health check).
+  - `backend/api/analyze.js` (same analysis flow as Express).
 - Both endpoints require `OPENAI_API_KEY`.
 
 ## Configuration & Scripts

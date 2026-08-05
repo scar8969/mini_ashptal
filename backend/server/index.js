@@ -1,7 +1,9 @@
 import express from 'express'
 import dotenv from 'dotenv'
 import cors from 'cors'
+import swaggerUi from 'swagger-ui-express'
 import { analyzeSymptoms } from './openai.js'
+import { swaggerSpec } from '../swagger.js'
 
 dotenv.config()
 
@@ -9,8 +11,10 @@ const app = express()
 const port = process.env.PORT || 5174
 
 // Basic security
-app.use(cors()) 
+app.use(cors())
 app.use(express.json({ limit: '1mb' }))
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec))
 
 // 🚑 THE UPGRADED OFFLINE PHYSIOLOGICAL FALLBACK ENGINE
 const emergencyFallbackAnalyze = (messages) => {
@@ -55,10 +59,75 @@ const emergencyFallbackAnalyze = (messages) => {
   })
 }
 
+/**
+ * @openapi
+ * /api/health:
+ *   get:
+ *     summary: Health check
+ *     description: Returns whether the backend is up and running.
+ *     responses:
+ *       200:
+ *         description: Backend is live.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                 status:
+ *                   type: string
+ */
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, status: 'Sankat AI Backend is Live' })
 })
 
+/**
+ * @openapi
+ * /api/analyze:
+ *   post:
+ *     summary: Analyze patient symptoms
+ *     description: >
+ *       Sends conversation history and an optional patient profile to the AI triage engine.
+ *       Falls back to a local keyword-based severity estimate if OPENAI_API_KEY is missing
+ *       or the OpenAI request fails.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [messages]
+ *             properties:
+ *               messages:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [role, content]
+ *                   properties:
+ *                     role:
+ *                       type: string
+ *                       enum: [user, assistant]
+ *                     content:
+ *                       type: string
+ *               patientProfile:
+ *                 type: object
+ *                 description: Optional patient context (age, gender, blood group, conditions, allergies, medications).
+ *     responses:
+ *       200:
+ *         description: Triage analysis result (stringified JSON with severity/advice, or offline fallback).
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 text:
+ *                   type: string
+ *                 isOfflineFallback:
+ *                   type: boolean
+ *       400:
+ *         description: Missing or invalid `messages` array.
+ */
 app.post('/api/analyze', async (req, res) => {
   try {
     const { messages, patientProfile } = req.body 

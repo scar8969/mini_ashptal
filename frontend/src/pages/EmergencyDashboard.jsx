@@ -113,7 +113,7 @@ const analyzeSymptoms = async (history, patientProfile, setOfflineStatus) => {
 
     return data.text
 
-  } catch (err) {
+  } catch {
     // 🎯 If the server is totally dead, turn on banner and run local fallback
     setOfflineStatus(true)
     const lastUserMessage = history[history.length - 1].content
@@ -146,7 +146,6 @@ function EmergencyDashboard() {
   const [isLoading, setIsLoading] = useState(false)
   const [contacts, setContacts] = useState([])
   const [selectedContactId, setSelectedContactId] = useState('')
-  const [isFindingHospitals, setIsFindingHospitals] = useState(false)
   const [hospitalError, setHospitalError] = useState('')
   const [isVoiceMode, setIsVoiceMode] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -174,6 +173,7 @@ function EmergencyDashboard() {
 
   const chatContainerRef = useRef(null)
   const [hasGreeted, setHasGreeted] = useState(false)
+  const sendMessageRef = useRef(null)
 
   // --- EFFECTS ---
 
@@ -286,7 +286,7 @@ function EmergencyDashboard() {
     recognition.onresult = (event) => {
       const last = event.results[event.results.length - 1]
       const transcript = last?.[0]?.transcript?.trim()
-      if (transcript) sendMessage(transcript)
+      if (transcript) sendMessageRef.current?.(transcript)
     }
 
     recognition.start()
@@ -369,13 +369,14 @@ function EmergencyDashboard() {
           speakText(botMessage.text)
         }
       }, 60)
-    } catch (error) {
+    } catch {
       const fallback = 'Service is temporarily unavailable.'
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'bot', text: fallback }])
     } finally {
       setIsLoading(false)
     }
   }
+  sendMessageRef.current = sendMessage
 
   const selectedContact = contacts.find((c) => c.id === selectedContactId)
   const primaryContact = selectedContact || contacts[0]
@@ -384,14 +385,12 @@ function EmergencyDashboard() {
 
   const handleFindHospitals = () => {
     if (!navigator.geolocation) return setHospitalError('Geolocation not supported.')
-    setIsFindingHospitals(true)
     setHospitalError('')
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         window.location.href = `https://www.google.com/maps/search/hospitals/@${pos.coords.latitude},${pos.coords.longitude},14z`
-        setIsFindingHospitals(false)
       },
-      () => { setIsFindingHospitals(false); setHospitalError('Location permission denied.') }
+      () => setHospitalError('Location permission denied.')
     )
   }
 
@@ -416,7 +415,7 @@ function EmergencyDashboard() {
 
   const handleShare = async (title, text, setNotice) => {
     if (navigator.share) {
-      try { await navigator.share({ title, text }); setNotice('Shared!') } catch { }
+      try { await navigator.share({ title, text }); setNotice('Shared!') } catch { /* user cancelled share */ }
     } else {
       handleCopy(text, setNotice)
     }
